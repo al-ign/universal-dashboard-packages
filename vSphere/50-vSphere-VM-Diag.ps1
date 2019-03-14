@@ -11,24 +11,25 @@ $scriptBlock = {
         New-UDInputAction -RedirectUrl ('/{0}/{1}' -f $PageTitle, $PageParameter)
         }
 
-function AsString {
+    function AsString {
     [CmdletBinding()]
-    Param (
-        [Parameter(Mandatory=$true,
-                   ValueFromPipeline=$true,
-                   Position=0)]
-        [string]$String
-        )
-    Begin {
-        [string]$EndString = ''
+        Param (
+            [Parameter(Mandatory=$true,
+                       ValueFromPipeline=$true,
+                       Position=0)]
+            [string]$String
+            )
+        Begin {
+            [string]$EndString = ''
+            }
+        Process {
+            $Endstring += $String
+            }
+        End {
+            $EndString -join ''
+            }
         }
-    Process {
-        $Endstring += $String
-        }
-    End {
-        $EndString -join ''
-        }
-    }
+
     function Get-ViName {
         [CmdletBinding()]
         [OutputType([string])]
@@ -43,6 +44,14 @@ function AsString {
             }
         }
 
+    filter Recurse-Snapshots {
+        $snap = $_ 
+        $snap
+        foreach ($thisSnap in $snap.childSnapshotList) {
+            $thisSnap | Recurse-Snapshots
+            }
+        }
+
     $iconFolder = '<i class="fa fa-folder  " id="9f397aec-e17b-41d9-8ecb-7763dac0e03c"></i>'
 
     if ($Cache:ViServer.Name) {
@@ -50,11 +59,6 @@ function AsString {
         }
     else {
         Connect-VIServer -Server $UDEPVarViServerList
-        }
-
-    New-UDLayout -Columns 2 -Content {
-        New-UDParagraph -Text ('Search string: ' + $PageParameter )
-        New-UDParagraph -Text ('Endpoint: ' + $vconnect.Name)
         }
     
     if ($PageParameter -match 'VirtualMachine-vm-\d+') {
@@ -67,19 +71,19 @@ function AsString {
     if ($view) {
         #cards
         foreach ($vm in $view) {
-                $basicVMInfo =  [pscustomobject][ordered]@{
-                    CPU = '{0} vCPU ({1}S * {2}C)' -f $vm.Config.Hardware.NumCPU, ($vm.Config.Hardware.NumCPU / $vm.Config.Hardware.NumCoresPerSocket), $vm.Config.Hardware.NumCoresPerSocket
-                    Folder = '{0}&nbsp;{1}' -f $iconFolder,( Get-VMTopFolder -VMView $vm ).Path
-                    Power =  $vm.Runtime.PowerState
-                    Host = '{0}' -f (get-view $vm.Runtime.Host -Property Name).Name
-                    RAM = '{0} Mb' -f $vm.Config.Hardware.MemoryMB
-                    PoolName = $vm.ResourcePool | Get-ViName
-                    PoolMoRef = $vm.ResourcePool
-                    GuestId = $vm.Guest.GuestId
-                    }
+            $basicVMInfo =  [pscustomobject][ordered]@{
+                CPU = '{0} vCPU ({1}S * {2}C)' -f $vm.Config.Hardware.NumCPU, ($vm.Config.Hardware.NumCPU / $vm.Config.Hardware.NumCoresPerSocket), $vm.Config.Hardware.NumCoresPerSocket
+                Folder = '{0}&nbsp;{1}' -f $iconFolder,( Get-VMTopFolder -VMView $vm ).Path
+                Power =  $vm.Runtime.PowerState
+                Host = '{0}' -f (get-view $vm.Runtime.Host -Property Name).Name
+                RAM = '{0} Mb' -f $vm.Config.Hardware.MemoryMB
+                PoolName = $vm.ResourcePool | Get-ViName
+                PoolMoRef = $vm.ResourcePool
+                GuestId = $vm.Guest.GuestId
+                }
  
-     $ResourcePool = Get-View -Id $basicVMInfo.PoolMoRef -Property Name, Runtime, Summary, Parent -ErrorAction SilentlyContinue  
-    $ResourcePool = foreach ($thisPool in $ResourcePool) {
+            $ResourcePool = Get-View -Id $basicVMInfo.PoolMoRef -Property Name, Runtime, Summary, Parent -ErrorAction SilentlyContinue  
+            $ResourcePool = foreach ($thisPool in $ResourcePool) {
         [PSCustomObject][ordered]@{
             Name = $thisPool.Name 
             CpuOverallUsage = $thisPool.Runtime.Cpu.OverallUsage
@@ -97,73 +101,81 @@ function AsString {
             }
         }
 
-                #hdd
-                $VMDKRaw = $vm.Config.Hardware.Device | ? { $_ -is [VMware.Vim.VirtualDisk] } 
+            #hdd
+            $VMDKRaw = $vm.Config.Hardware.Device | ? { $_ -is [VMware.Vim.VirtualDisk] } 
 
-                $VMDK = foreach ($thisVMDK in $VMDKRaw) {
-                    $thisVMDKFileName = $thisVMDK.Backing.FileName -replace '\[.+\]\s*'
+            $VMDK = foreach ($thisVMDK in $VMDKRaw) {
+                $thisVMDKFileName = $thisVMDK.Backing.FileName -replace '\[.+\]\s*'
+                [pscustomobject][ordered]@{
+                    Size = [math]::Round( ( $thisVMDK.CapacityInBytes / 1GB ) ) 
+                    Ctrl = $thisVMDK.ControllerKey
+                    Unit = $thisVMDK.UnitNumber
+                    File = $thisVMDKFileName
+                    Store = (get-view $thisVMDK.Backing.Datastore -Property Name).Name
+                    Thin = [string]($thisVMDK.Backing.ThinProvisioned)
+                    }
+
+                }
+
+            $VMDKTotal = foreach ($u in $VMDK | Select-Object -Property Store -Unique) {
+                [pscustomobject][ordered]@{
+                    Store = $u.Store
+                    Total = ($VMDK | ? Store -eq $u.store | Measure-Object -Property Size -Sum).Sum
+                    }
+                }
+            $VMDKRaw = $null
+
+            #net 
+            $NetDevices = @($vm.Config.Hardware.Device | ? {$_ -is [VMware.Vim.VirtualEthernetCard]} )
+            $NetDevices = foreach ($thisNetDevice in $NetDevices) {
+                if ($thisNetDevice.Backing.Port -is [VMware.Vim.DistributedVirtualSwitchPortConnection]) {
+                    $thisNetDeviceNetwork = [string]((get-view -id ('DistributedVirtualPortgroup-' + $thisNetDevice.Backing.Port.PortgroupKey) -Property Name).Name)
+                    }
+                if ($thisNetDevice.Backing -is [VMware.Vim.VirtualEthernetCardNetworkBackingInfo]) {
+                    $thisNetDeviceNetwork = $thisNetDevice.Backing.DeviceName
+                    }
+                [PSCustomObject]@{
+                    MAC = $thisNetDevice.MACAddress.ToUpper() 
+                    Network = $thisNetDeviceNetwork
+                    Label = $thisNetDevice.DeviceInfo.Label
+                    Connected = ($thisNetDevice.Connectable.Connected)
+                    }
+                }
+
+            #guest
+            if ($vm.Guest.ToolsRunningStatus -eq 'guestToolsRunning') {
+                #disks
+                $GuestDisks = foreach ($disk in $vm.Guest.Disk) {
                     [pscustomobject][ordered]@{
-                        Size = [math]::Round( ( $thisVMDK.CapacityInBytes / 1GB ) ) 
-                        Ctrl = $thisVMDK.ControllerKey
-                        Unit = $thisVMDK.UnitNumber
-                        File = $thisVMDKFileName
-                        Store = (get-view $thisVMDK.Backing.Datastore -Property Name).Name
-                        Thin = [string]($thisVMDK.Backing.ThinProvisioned)
+                        Path = $disk.DiskPath
+                        Size = $disk.Capacity / 1GB | Round-Value
+                        Free = $disk.FreeSpace / 1GB | Round-Value
+                        '%' = $disk.FreeSpace / $disk.Capacity * 100 | Round-Value
                         }
+                    }#end guestdisks
 
-                    }
-
-                $VMDKTotal = foreach ($u in $VMDK | Select-Object -Property Store -Unique) {
-                    [pscustomobject][ordered]@{
-                        Store = $u.Store
-                        Total = ($VMDK | ? Store -eq $u.store | Measure-Object -Property Size -Sum).Sum
-                        }
-                    }
-                $VMDKRaw = $null
-
-                #net 
-                $NetDevices = @($vm.Config.Hardware.Device | ? {$_ -is [VMware.Vim.VirtualEthernetCard]} )
-                $NetDevices = foreach ($thisNetDevice in $NetDevices) {
-                    if ($thisNetDevice.Backing.Port -is [VMware.Vim.DistributedVirtualSwitchPortConnection]) {
-                        $thisNetDeviceNetwork = [string]((get-view -id ('DistributedVirtualPortgroup-' + $thisNetDevice.Backing.Port.PortgroupKey) -Property Name).Name)
-                        }
-                    if ($thisNetDevice.Backing -is [VMware.Vim.VirtualEthernetCardNetworkBackingInfo]) {
-                        $thisNetDeviceNetwork = $thisNetDevice.Backing.DeviceName
-                        }
-                    [PSCustomObject]@{
-                        MAC = $thisNetDevice.MACAddress.ToUpper() 
-                        Network = $thisNetDeviceNetwork
-                        Label = $thisNetDevice.DeviceInfo.Label
-                        Connected = ($thisNetDevice.Connectable.Connected)
-                        }
-                    }
-                #guest
-                if ($vm.Guest.ToolsRunningStatus -eq 'guestToolsRunning') {
-                    #disks
-                    $GuestDisks = foreach ($disk in $vm.Guest.Disk) {
-                        [pscustomobject][ordered]@{
-                            Path = $disk.DiskPath
-                            Size = $disk.Capacity / 1GB | Round-Value
-                            Free = $disk.FreeSpace / 1GB | Round-Value
-                            '%' = $disk.FreeSpace / $disk.Capacity * 100 | Round-Value
+                #guest network
+                $guestnet = foreach ($guestnet in $vm.Guest.net) {
+                    foreach ($Ip in $guestnet.IpConfig.IpAddress) {
+                        [pscustomobject]@{
+                            Network = $guestnet.network
+                            MAC = $guestnet.MacAddress
+                            Ip = $Ip.IpAddress
+                            Mask = $Ip.PrefixLength
+                            Origin = [string]$ip.Origin
+                            Connected = [bool]($NetDevices | ? MAC -eq $guestnet.MacAddress).Connected
                             }
-                        }#end guestdisks
+                        }
+                    }#End guestnet
 
-                    #guest network
-                    $guestnet = foreach ($guestnet in $vm.Guest.net) {
-                        foreach ($Ip in $guestnet.IpConfig.IpAddress) {
-                            [pscustomobject]@{
-                                Network = $guestnet.network
-                                MAC = $guestnet.MacAddress
-                                Ip = $Ip.IpAddress
-                                Mask = $Ip.PrefixLength
-                                Origin = [string]$ip.Origin
-                                Connected = [bool]($NetDevices | ? MAC -eq $guestnet.MacAddress).Connected
-                                }
-                            }
-                        }#End guestnet
+                }#end guest
 
-                    }#end guest
+            #Get list of snapshots
+            $snapshotList = $vm.Snapshot.RootSnapshotList | Recurse-Snapshots | select Name, Description, CreateTime, Age | % {
+                $_.Age = [math]::Round(((get-date) - $_.CreateTime[0]).TotalDays)
+                $_
+                }
+
 
     #scriptblocks for UDCards
     $VMGuestInfo =  {
@@ -171,6 +183,7 @@ function AsString {
             $vm.Guest | select Hostname, IpAddress, GuestFullName | ConvertTo-Html -as List -Fragment | AsString
             )
         }
+
     $VMGuestDisk = {
         $arrProp = 'Path', 'Size', 'Free', '%'
         if ($GuestDisks) {
@@ -223,7 +236,18 @@ function AsString {
                 } | Out-UDTableData -Property $ArgumentList[1]
              }
         }# End VMGuestNetAddress
-
+        
+    $VMSnapshots = {
+        if ($snapshotList) {
+            $arrProp = 'Name', 'Description', 'CreateTime', 'Age'
+            New-UDTable -Title 'Snapshots' -Headers $arrProp -ArgumentList @($snapshotList, $arrProp)  -Endpoint {
+                $ArgumentList[0] | Out-UDTableData -Property $ArgumentList[1]
+                }
+            }
+        else {
+            New-UDParagraph -Text 'No snapshots found'
+            }
+        }
 
 
     $VMBasicInfo = {
@@ -265,8 +289,9 @@ function AsString {
                     if ($vm.Guest.ToolsRunningStatus -eq 'guestToolsRunning') {
                         New-UDCard -Content $VMGuestInfo
                         & $VMGuestDisk
-                        }             
-                               
+                        }         
+                            
+                    & $VMSnapshots
                     & $VMDataStoreTotalUsage 
                     & $VMVMDKList
                     & $VMNetInterface 

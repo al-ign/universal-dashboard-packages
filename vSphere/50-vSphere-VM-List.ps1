@@ -9,7 +9,7 @@ $scriptBlock = {
 
     $arrProp = 'Name', 'PowerState', 'IpAddress'
     New-UDGrid -Title 'Search VM by name or IP address' -Headers $arrProp -Properties $arrProp -Endpoint  {
-        $Cache:VMList  | select @{N='Name';E={New-UDLink -Text $_.Name -Url ('/vminfo/' + $_.Moref)}}, PowerState, IpAddress | Out-UDGridData
+        $Cache:VMList  | select @{N='Name';E={New-UDLink -Text $_.Name -Url ('/vSphere VM Info/' + $_.Moref)}}, PowerState, IpAddress | Out-UDGridData
 
         }#End UDGrid
 
