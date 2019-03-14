@@ -44,6 +44,57 @@ $scriptBlock = {
             }
         }
 
+    function Get-VMFolderPath {
+    [CmdletBinding(DefaultParameterSetName='VMName')]
+        param (
+            [Parameter(ParameterSetName='VMName',
+                Position=0
+                )]
+            [string]$Name,
+            [Parameter(ParameterSetName='VMware.Vim.VirtualMachine',
+                Position=0
+                )]
+            [VMware.Vim.VirtualMachine[]]$view,
+            [string]$Delimiter = ', '
+            )
+
+        filter Get-FolderParents {
+            $vm = $_
+            $parent = get-view -id $vm.parent -Property Name, Parent 
+            $list = $(
+                $parent | select Name, Parent
+                while ($parent -is [VMware.Vim.Folder]) {
+        
+                    $parent = get-view -id  $parent.Parent -Property Name, Parent
+                    if ($parent.Name -eq 'vm') {
+                        break
+                        }
+                    $parent | select Name, Parent
+
+                    }
+                )
+            $list
+            }
+
+        if ($PSBoundParameters.'Name') {
+            $view = Get-View -ViewType VirtualMachine -Filter @{Name = $PSBoundParameters.'Name'}
+            }
+
+        foreach ($VM in $view) {
+            $folderlist = $VM | Get-FolderParents 
+
+            [pscustomobject][ordered]@{
+                Name = $vm.Name
+                MoRef = $vm.MoRef
+                Parent = $vm.Parent
+                FolderList = $folderlist
+                Path = ($folderlist).Name -join $Delimiter
+                PathReverse = ($folderlist[$folderlist.GetUpperBound(0)..0]).Name -join $Delimiter
+                }
+            }
+
+        }
+
     filter Recurse-Snapshots {
         $snap = $_ 
         $snap
@@ -73,7 +124,7 @@ $scriptBlock = {
         foreach ($vm in $view) {
             $basicVMInfo =  [pscustomobject][ordered]@{
                 CPU = '{0} vCPU ({1}S * {2}C)' -f $vm.Config.Hardware.NumCPU, ($vm.Config.Hardware.NumCPU / $vm.Config.Hardware.NumCoresPerSocket), $vm.Config.Hardware.NumCoresPerSocket
-                Folder = '{0}&nbsp;{1}' -f $iconFolder,( Get-VMTopFolder -VMView $vm ).Path
+                Folder = '{0}&nbsp;{1}' -f $iconFolder,(  Get-VMFolderPath -view $vm ).Path
                 Power =  $vm.Runtime.PowerState
                 Host = '{0}' -f (get-view $vm.Runtime.Host -Property Name).Name
                 RAM = '{0} Mb' -f $vm.Config.Hardware.MemoryMB
