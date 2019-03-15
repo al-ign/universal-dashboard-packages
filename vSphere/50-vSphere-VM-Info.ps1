@@ -81,7 +81,7 @@ $scriptBlock = {
             }
 
         foreach ($VM in $view) {
-            $folderlist = $VM | Get-FolderParents 
+            $folderlist = @($VM | Get-FolderParents)
 
             [pscustomobject][ordered]@{
                 Name = $vm.Name
