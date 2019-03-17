@@ -73,7 +73,9 @@ $scriptBlock = {
                 -ArgumentList @($arrProp,$snapsStats) `
                 -Endpoint {
                     $arrProp = $ArgumentList[0]
-                    $ArgumentList[1] | Out-UDTableData -Property $arrProp
+                    $ArgumentList[1] | % { 
+                        $_.Name =  New-UDLink -Text ($_.Name) -Url ('/vSphere VM Info/' + $_.MoRef.ToString())
+                        $_ } | Out-UDTableData -Property $arrProp
                     }
             }
         $tableSnapList = {
@@ -83,7 +85,9 @@ $scriptBlock = {
                 -ArgumentList @($arrProp,$snaps) `
                 -Endpoint {
                     $arrProp = $ArgumentList[0]
-                    $ArgumentList[1] | Out-UDTableData -Property $arrProp
+                    $ArgumentList[1] | % { 
+                        $_.Name =  New-UDLink -Text ($_.Name) -Url ('/vSphere VM Info/' + $_.MoRef.ToString())
+                        $_ } | Out-UDTableData -Property $arrProp
                     }
             }
         & $tableSnapStats
