@@ -1,20 +1,25 @@
 ﻿#this script will try to load any .dll assemblies in the Assemblies sub-folder in the dashboard root
 
-$assemblyLoadErrors = @()
+$assemblyLoadResults = @()
 
 $cache:DashboardRootPath | Join-Path -ChildPath 'Assemblies' | Get-ChildItem -Filter '*.dll' -Recurse | % {
     
-    $thisFilePath = $_.fullname
+    $obj = [pscustomobject]@{
+            File = $_.fullname
+            Loaded = $false
+            Error = $null
+            }
+    
     try {
-        [System.Reflection.Assembly]::LoadFile($_.fullname)
+        [System.Reflection.Assembly]::LoadFile($obj.File)
+        $obj.Loaded = $true
         }
     catch {
-        $assemblyLoadErrors += [pscustomobject]@{
-            File = $thisFilePath
-            Error = $Error[0]
-            }
+        $obj.Error = $Error[0].Exception.Message
         }
+
+    $assemblyLoadResults += $obj
     }
 
 #can be used to debug
-$cache:assemblyLoadErrors = $assemblyLoadErrors
+$cache:assemblyLoadResults = $assemblyLoadResults

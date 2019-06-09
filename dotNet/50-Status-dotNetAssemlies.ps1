@@ -1,23 +1,18 @@
 ﻿$PageTitle = 'Status dotNet Assemblies'
 
-$PageDescription = 'Display errors while loading dotNET assemblies'
+$PageDescription = 'Display dotNET assemblies loading status'
 
 #Create UDPage Endpoint
 $scriptBlock = {
     #Your content here
     New-UDParagraph -Text (
-        '$cache:assemblyLoadErrors count: {0}' -f ($cache:assemblyLoadErrors).Count
+        '$cache:assemblyLoadResults count: {0}' -f ($cache:assemblyLoadResults).Count
         )
     
-    $cache:assemblyLoadErrors | % {
-        New-UDParagraph -Text (
-            '{0}' -f $_.File
-            )
-        New-UDParagraph -Text (
-            '{0}' -f $_.Error.Exception
-            )
+    New-UDGrid -Title 'Assemblies' -Endpoint {
+        $cache:assemblyLoadResults | Out-UDGridData
         }
-
+    
     #footer
     New-UDParagraph -Text "This page was generated at $(Get-Date)"
     } #End UDPage ScriptBlock
